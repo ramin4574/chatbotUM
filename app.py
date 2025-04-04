@@ -1,7 +1,73 @@
-import streamlit as st
 import os
 import sys
+import importlib
 import traceback
+
+# Explicitly manage Python path and ChromaDB import
+def setup_python_path():
+    """Add potential package directories to Python path."""
+    base_paths = [
+        os.path.dirname(os.path.abspath(__file__)),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'venv', 'lib', 'python3.12', 'site-packages'),
+        '/home/adminuser/venv/lib/python3.12/site-packages',
+        '/opt/conda/lib/python3.12/site-packages',
+        '/usr/local/lib/python3.12/site-packages'
+    ]
+    for path in base_paths:
+        if path not in sys.path:
+            sys.path.append(path)
+
+def import_chromadb():
+    """
+    Attempt to import ChromaDB with multiple fallback strategies.
+    
+    Returns:
+        The imported chromadb module or None if import fails.
+    """
+    setup_python_path()
+    
+    import_strategies = [
+        lambda: importlib.import_module('chromadb'),
+        lambda: __import__('chromadb'),
+        lambda: importlib.import_module('chromadb.config'),
+    ]
+    
+    last_exception = None
+    for strategy in import_strategies:
+        try:
+            return strategy()
+        except (ImportError, RuntimeError) as e:
+            last_exception = e
+    
+    # If all strategies fail, log detailed error
+    error_message = f"""
+    Critical ChromaDB Import Failure
+    --------------------------------
+    Python Version: {sys.version}
+    Python Path: {sys.path}
+    Last Exception: {last_exception}
+    Traceback: {traceback.format_exc()}
+    
+    Possible Solutions:
+    1. Verify ChromaDB installation
+    2. Check Python version compatibility
+    3. Ensure all dependencies are correctly installed
+    """
+    
+    # Use print instead of st.error to ensure visibility
+    print(error_message)
+    raise ImportError(f"Cannot import ChromaDB: {error_message}")
+
+# Perform the import
+try:
+    chromadb = import_chromadb()
+except Exception as e:
+    # Fallback error handling
+    print(f"Catastrophic Import Error: {e}")
+    chromadb = None
+
+# Rest of the imports
+import streamlit as st
 from dotenv import load_dotenv
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
@@ -12,42 +78,9 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain.docstore.document import Document
 
-# Explicitly handle ChromaDB import with comprehensive error handling
-import os
-import sys
-import importlib
-import traceback
-
-# Attempt to import ChromaDB with multiple fallback strategies
-def import_chromadb():
-    try:
-        # Strategy 1: Direct import
-        import chromadb
-        return chromadb
-    except ImportError:
-        try:
-            # Strategy 2: Use importlib
-            chromadb = importlib.import_module('chromadb')
-            return chromadb
-        except ImportError:
-            try:
-                # Strategy 3: Modify system path
-                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-                sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'venv', 'lib', 'python3.12', 'site-packages'))
-                import chromadb
-                return chromadb
-            except ImportError as e:
-                # Detailed error logging
-                st.error(f"Critical ChromaDB Import Error: {e}")
-                st.error(f"Import Traceback: {traceback.format_exc()}")
-                st.error("Possible solutions:")
-                st.error("1. Ensure ChromaDB is installed in your environment")
-                st.error("2. Check Python version compatibility")
-                st.error("3. Verify package installation")
-                raise RuntimeError(f"Cannot import ChromaDB: {e}")
-
-# Perform the import
-chromadb = import_chromadb()
+# Ensure the data directory exists
+os.makedirs("data/vectorstore", exist_ok=True)
+os.chmod("data/vectorstore", 0o755)
 
 def get_api_key():
     """
@@ -107,10 +140,6 @@ def get_embeddings():
 def get_absolute_path(relative_path):
     """Get absolute path from relative path."""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), relative_path))
-
-# Ensure data directory exists with explicit permissions
-os.makedirs("data/vectorstore", exist_ok=True)
-os.chmod("data/vectorstore", 0o755)
 
 # Robust ChromaDB client initialization
 def get_chroma_client():
