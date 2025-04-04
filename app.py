@@ -111,7 +111,7 @@ def get_api_key():
                 # Explicitly set the environment variable
                 os.environ["OPENAI_API_KEY"] = api_key.strip()
                 # Rerun the app to use the new key
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Please enter a valid API key")
         
@@ -496,7 +496,7 @@ def main():
                     # Reset initialization state
                     st.session_state.is_initialized = False
                     st.session_state.qa_chain = None
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("Please enter a valid API key")
             
