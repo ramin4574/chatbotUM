@@ -29,14 +29,21 @@ def import_chromadb():
     import_strategies = [
         lambda: importlib.import_module('chromadb'),
         lambda: __import__('chromadb'),
-        lambda: importlib.import_module('chromadb.config'),
     ]
     
     last_exception = None
     for strategy in import_strategies:
         try:
-            return strategy()
-        except (ImportError, RuntimeError) as e:
+            chromadb_module = strategy()
+            # Verify the module has the expected attributes
+            if hasattr(chromadb_module, 'PersistentClient'):
+                return chromadb_module
+            # If not, try to import PersistentClient directly
+            if not hasattr(chromadb_module, 'PersistentClient'):
+                from chromadb import PersistentClient
+                chromadb_module.PersistentClient = PersistentClient
+            return chromadb_module
+        except (ImportError, RuntimeError, AttributeError) as e:
             last_exception = e
     
     # If all strategies fail, log detailed error
@@ -152,7 +159,12 @@ def get_chroma_client():
         os.chmod(vectorstore_path, 0o755)
         
         # Initialize client with comprehensive error handling
-        client = chromadb.PersistentClient(path=vectorstore_path)
+        # Use direct import if needed
+        if not hasattr(chromadb, 'PersistentClient'):
+            from chromadb import PersistentClient
+            client = PersistentClient(path=vectorstore_path)
+        else:
+            client = chromadb.PersistentClient(path=vectorstore_path)
         
         # Verify client initialization
         if client is None:
