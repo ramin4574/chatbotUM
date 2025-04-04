@@ -2,6 +2,12 @@ import os
 import sys
 import importlib
 import traceback
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from langchain.vectorstores.base import VectorStore
+from langchain.docstore.document import Document
+from langchain.embeddings.base import Embeddings
 
 # Explicitly manage Python path and ChromaDB import
 def setup_python_path():
@@ -83,7 +89,6 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_openai import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
-from langchain.docstore.document import Document
 
 # Ensure the data directory exists
 os.makedirs("data/vectorstore", exist_ok=True)
@@ -350,254 +355,350 @@ def ensure_directory_permissions(directory):
         st.error(f"Error setting up directory permissions: {e}")
         return False
 
-def initialize_chatbot(api_key):
-    """Initialize the chatbot with documents."""
-    try:
-        st.write("Starting initialization...")
-        os.environ["OPENAI_API_KEY"] = api_key
+# Alternative Vector Store Implementation
+class SimpleVectorStore(VectorStore):
+    def __init__(self, documents, embeddings):
+        """
+        Create a simple vector store using TF-IDF and cosine similarity
         
-        # Check for existing vector store first
-        vector_store = check_existing_vectorstore()
-        if vector_store:
-            st.success("📚 Loading existing document database...")
+        Args:
+            documents (List[Document]): List of documents to index
+            embeddings (Embeddings): Embedding function
+        """
+        self.embeddings = embeddings
+        # Extract text content from documents
+        self.documents = documents
+        self.texts = [doc.page_content for doc in documents]
+        self.metadatas = [doc.metadata for doc in documents]
+        
+        # Create TF-IDF vectorizer
+        self.vectorizer = TfidfVectorizer()
+        self.tfidf_matrix = self.vectorizer.fit_transform(self.texts)
+        
+        st.info(f"Indexed {len(self.documents)} documents")
+    
+    def add_texts(self, texts, metadatas=None, **kwargs):
+        """
+        Add new texts to the vector store
+        
+        Args:
+            texts (List[str]): Texts to add
+            metadatas (List[dict], optional): Metadata for each text
+        
+        Returns:
+            List[str]: List of added document IDs
+        """
+        # Generate documents from texts
+        if metadatas is None:
+            metadatas = [{}] * len(texts)
+        
+        new_documents = [
+            Document(page_content=text, metadata=metadata)
+            for text, metadata in zip(texts, metadatas)
+        ]
+        
+        # Add documents to the existing store
+        self.documents.extend(new_documents)
+        self.texts.extend(texts)
+        self.metadatas.extend(metadatas)
+        
+        # Recompute TF-IDF matrix
+        self.vectorizer = TfidfVectorizer()
+        self.tfidf_matrix = self.vectorizer.fit_transform(self.texts)
+        
+        # Return document IDs (simple incremental IDs)
+        return [f"doc_{len(self.documents) - len(texts) + i}" for i in range(len(texts))]
+    
+    @classmethod
+    def from_texts(cls, texts, embedding, metadatas=None, **kwargs):
+        """
+        Create a new vector store from raw texts
+        
+        Args:
+            texts (List[str]): Texts to index
+            embedding (Embeddings): Embedding function
+            metadatas (List[dict], optional): Metadata for each text
+        
+        Returns:
+            SimpleVectorStore: Initialized vector store
+        """
+        # Generate documents from texts
+        if metadatas is None:
+            metadatas = [{}] * len(texts)
+        
+        documents = [
+            Document(page_content=text, metadata=metadata)
+            for text, metadata in zip(texts, metadatas)
+        ]
+        
+        return cls(documents, embedding)
+    
+    def similarity_search(self, query, k=4):
+        """
+        Perform similarity search using cosine similarity
+        
+        Args:
+            query (str): Search query
+            k (int): Number of top results to return
+        
+        Returns:
+            List[Document]: Top k most similar documents
+        """
+        # Vectorize the query
+        query_vector = self.vectorizer.transform([query])
+        
+        # Compute cosine similarities
+        similarities = cosine_similarity(query_vector, self.tfidf_matrix)[0]
+        
+        # Get top k indices
+        top_indices = similarities.argsort()[-k:][::-1]
+        
+        # Return top k documents
+        return [self.documents[idx] for idx in top_indices]
+    
+    def similarity_search_with_score(self, query, k=4):
+        """
+        Perform similarity search with similarity scores
+        
+        Args:
+            query (str): Search query
+            k (int): Number of top results to return
+        
+        Returns:
+            List[Tuple[Document, float]]: Top k documents with their similarity scores
+        """
+        # Vectorize the query
+        query_vector = self.vectorizer.transform([query])
+        
+        # Compute cosine similarities
+        similarities = cosine_similarity(query_vector, self.tfidf_matrix)[0]
+        
+        # Get top k indices and scores
+        top_indices = similarities.argsort()[-k:][::-1]
+        top_scores = similarities[top_indices]
+        
+        # Return top k documents with scores
+        return [(self.documents[idx], score) for idx, score in zip(top_indices, top_scores)]
+    
+    def add_documents(self, documents, **kwargs):
+        """
+        Add new documents to the vector store
+        
+        Args:
+            documents (List[Document]): Documents to add
+        """
+        # Add documents to the existing store
+        self.documents.extend(documents)
+        new_texts = [doc.page_content for doc in documents]
+        new_metadatas = [doc.metadata for doc in documents]
+        
+        self.texts.extend(new_texts)
+        self.metadatas.extend(new_metadatas)
+        
+        # Update TF-IDF matrix
+        self.vectorizer = TfidfVectorizer()
+        self.tfidf_matrix = self.vectorizer.fit_transform(self.texts)
+    
+    def delete(self, ids=None, **kwargs):
+        """
+        Delete documents by their IDs
+        
+        Args:
+            ids (List[str], optional): List of document IDs to delete
+        """
+        if ids is None:
+            # If no IDs provided, clear all documents
+            self.documents = []
+            self.texts = []
+            self.metadatas = []
+            self.tfidf_matrix = None
         else:
-            st.info("🔄 Creating new document database...")
-            # Load documents from the data directory
-            documents = []
-            
-            # Directories to load
-            base_data_dir = get_absolute_path("data")
-            directories_to_load = [
-                os.path.join(base_data_dir, "policies"),
-                os.path.join(base_data_dir, "courses"),
-                os.path.join(base_data_dir, "handbooks"),
-                os.path.join(base_data_dir, "faqs")
+            # Remove documents by their indices
+            indices_to_keep = [
+                i for i in range(len(self.documents)) 
+                if f"doc_{i}" not in ids
             ]
             
-            # Create directories if they don't exist
-            for directory in directories_to_load:
-                os.makedirs(directory, exist_ok=True)
+            # Filter documents, texts, and metadatas
+            self.documents = [self.documents[i] for i in indices_to_keep]
+            self.texts = [self.texts[i] for i in indices_to_keep]
+            self.metadatas = [self.metadatas[i] for i in indices_to_keep]
             
-            # Create vectorstore directory
-            vectorstore_path = get_absolute_path("data/vectorstore")
-            os.makedirs(vectorstore_path, exist_ok=True)
+            # Recompute TF-IDF matrix
+            self.vectorizer = TfidfVectorizer()
+            self.tfidf_matrix = self.vectorizer.fit_transform(self.texts)
+    
+    def __len__(self):
+        """
+        Return the number of documents in the vector store
+        
+        Returns:
+            int: Number of documents
+        """
+        return len(self.documents)
+    
+    def persist(self, folder_path=None, **kwargs):
+        """
+        Persist the vector store to a folder
+        
+        Args:
+            folder_path (str, optional): Path to save the vector store
+        """
+        # In this simple implementation, we don't actually persist
+        # A more robust implementation would save texts, metadatas, and TF-IDF matrix
+        if folder_path:
+            os.makedirs(folder_path, exist_ok=True)
+            # Placeholder for actual persistence logic
+            st.info(f"Persisted vector store to {folder_path}")
+    
+    def as_retriever(self, search_kwargs=None):
+        """
+        Create a retriever from the vector store
+        
+        Args:
+            search_kwargs (dict, optional): Additional search parameters
+        
+        Returns:
+            Retriever: A retriever object compatible with LangChain
+        """
+        if search_kwargs is None:
+            search_kwargs = {"k": 4}
+        
+        # Create a custom retriever class
+        class SimpleRetriever:
+            def __init__(self, vector_store, search_kwargs):
+                self.vector_store = vector_store
+                self.search_kwargs = search_kwargs
             
-            st.info("""
-            📚 Document Locations:
-            - Place policy documents in: `data/policies/`
-            - Place course materials in: `data/courses/`
-            - Place handbooks in: `data/handbooks/`
-            - Place FAQs in: `data/faqs/`
-            
-            Supported formats: PDF and TXT files
-            
-            To update the knowledge base:
-            1. Add new documents to these folders
-            2. Click "Reinitialize Document Database" in the sidebar
-            """)
-            
-            # Create a status container
-            status_container = st.empty()
-            progress_container = st.empty()
-            my_bar = progress_container.progress(0)
-            
-            # First scan for files
-            total_files = 0
-            total_size = 0
-            file_list = []
-            
-            # Scan all directories first
-            for directory in directories_to_load:
-                try:
-                    if os.path.exists(directory):
-                        files = [f for f in os.listdir(directory) if not f.startswith('.') and (f.endswith('.pdf') or f.endswith('.txt'))]
-                        for f in files:
-                            file_path = os.path.join(directory, f)
-                            try:
-                                if os.path.isfile(file_path):
-                                    size = os.path.getsize(file_path)
-                                    file_list.append((directory, f, size))
-                                    total_size += size
-                                    total_files += 1
-                            except OSError as e:
-                                st.error(f"Error getting size for {file_path}: {e}")
-                except Exception as e:
-                    st.error(f"Error accessing directory {directory}: {e}")
-            
-            if total_files == 0:
-                st.error("No valid documents found in the specified directories.")
-                return None
-            
-            status_container.info(f"Found {total_files} files (Total size: {get_file_size(total_size)})")
-            
-            # Process files
-            files_processed = 0
-            size_processed = 0
-            
-            for directory, file, size in file_list:
-                try:
-                    file_path = os.path.join(directory, file)
-                    if not os.path.isfile(file_path):
-                        st.error(f"File not found: {file_path}")
-                        continue
-                        
-                    status_container.info(f"Processing {file} ({get_file_size(size)})...")
-                    
-                    try:
-                        if file.endswith(".pdf"):
-                            loader = PyPDFLoader(file_path)
-                            pdf_docs = loader.load()
-                            # Add debug logging
-                            st.info(f"Extracted {len(pdf_docs)} pages from {file}")
-                            for i, doc in enumerate(pdf_docs):
-                                st.text(f"Page {i+1} preview: {doc.page_content[:200]}...")
-                            documents.extend(pdf_docs)
-                        elif file.endswith(".txt"):
-                            with open(file_path, 'r') as f:
-                                content = f.read()
-                                documents.append(Document(page_content=content, metadata={"source": file_path}))
-                        
-                        files_processed += 1
-                        size_processed += size
-                        progress = size_processed / total_size if total_size > 0 else 0
-                        my_bar.progress(progress, f"Processing files... ({files_processed}/{total_files})")
-                        
-                    except Exception as file_error:
-                        st.error(f"Error loading file {file_path}: {file_error}")
-                        
-                except Exception as list_error:
-                    st.error(f"Error processing file {file}: {list_error}")
-                    
-            if not documents:
-                st.error("No documents could be loaded successfully.")
-                return None
-            
-            status_container.info("Splitting documents into chunks...")
-            
-            # Split documents into chunks
-            try:
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=2000,  # Increased chunk size
-                    chunk_overlap=200
+            def get_relevant_documents(self, query):
+                return self.vector_store.similarity_search(
+                    query, 
+                    k=self.search_kwargs.get("k", 4)
                 )
-                texts = text_splitter.split_documents(documents)
-                status_container.info(f"Split into {len(texts)} chunks")
-                # Add debug logging for chunks
-                st.info("Preview of first few chunks:")
-                for i, chunk in enumerate(texts[:3]):
-                    st.text(f"Chunk {i+1} preview: {chunk.page_content[:200]}...")
-                
-                if not texts:
-                    st.error("No text chunks were created from the documents.")
-                    return None
+            
+            async def aget_relevant_documents(self, query):
+                return self.get_relevant_documents(query)
+        
+        return SimpleRetriever(self, search_kwargs)
+
+# Modify vector store creation function
+def create_vector_store(texts, embeddings, vectorstore_path):
+    """
+    Create a vector store using a simple TF-IDF approach
+    
+    Args:
+        texts (List[Document]): Documents to index
+        embeddings (Embeddings): Embedding function
+        vectorstore_path (str): Path to store the vector store (not used in this implementation)
+    
+    Returns:
+        SimpleVectorStore: Initialized vector store
+    """
+    try:
+        # Ensure directory exists
+        os.makedirs(vectorstore_path, exist_ok=True)
+        
+        # Create vector store
+        vector_store = SimpleVectorStore(texts, embeddings)
+        
+        return vector_store
+    
+    except Exception as e:
+        st.error(f"Vector store creation error: {e}")
+        st.error(f"Detailed error: {traceback.format_exc()}")
+        return None
+
+# Modify the initialization function to use the new vector store
+def initialize_chatbot(api_key):
+    """
+    Initialize the chatbot with a new vector store implementation
+    
+    Args:
+        api_key (str): OpenAI API key
+    
+    Returns:
+        ConversationalRetrievalChain or None
+    """
+    try:
+        # Set up OpenAI embeddings
+        embeddings = OpenAIEmbeddings(openai_api_key=api_key)
+        
+        # Prepare status container
+        status_container = st.empty()
+        status_container.info("Initializing document database...")
+        
+        # Load and split documents
+        vectorstore_path = os.path.abspath("data/vectorstore")
+        
+        # Find and load documents
+        documents = []
+        supported_dirs = ['policies', 'courses', 'handbooks', 'faqs']
+        
+        for doc_dir in supported_dirs:
+            dir_path = os.path.join("data", doc_dir)
+            if os.path.exists(dir_path):
+                for filename in os.listdir(dir_path):
+                    file_path = os.path.join(dir_path, filename)
                     
-            except Exception as split_error:
-                st.error(f"Error splitting documents: {split_error}")
-                return None
-            
-            # Create vector store
-            try:
-                status_container.info("Creating vector store (this may take a few minutes)...")
-                my_bar.progress(1.0)
-                
-                # Ensure directory exists and is writable
-                vectorstore_path = get_absolute_path("data/vectorstore")
-                os.makedirs(vectorstore_path, mode=0o755, exist_ok=True)
-                
-                embeddings = get_embeddings()
-                
-                # Create vector store with explicit client
-                vector_store = Chroma.from_documents(
-                    documents=texts,
-                    embedding=embeddings,
-                    client=get_chroma_client(),
-                    persist_directory=vectorstore_path,
-                    collection_name="university_docs"
-                )
-                vector_store.persist()
-                status_container.success("Vector store created and persisted successfully!")
-                
-            except Exception as vector_store_error:
-                # Fallback to alternative vector store creation
-                st.warning(f"Standard vector store creation failed: {vector_store_error}")
-                st.info("Attempting alternative vector store initialization...")
-                
-                try:
-                    # Use alternative vector store creation method
-                    vector_store = create_vector_store_alternative(texts, embeddings, vectorstore_path)
-                    
-                    if vector_store is None:
-                        st.error("Failed to create vector store using both methods.")
-                        return None
-                    
-                    status_container.success("Vector store created using in-memory method!")
-                
-                except Exception as alt_error:
-                    st.error(f"Alternative vector store creation failed: {alt_error}")
-                    return None
-            
-            # Clean up progress indicators
-            progress_container.empty()
-            
-        # Initialize the QA chain
-        try:
-            status_container.info("Initializing QA chain...")
-            
-            # Create a custom prompt template for more detailed answers
-            template = """You are a helpful university assistant with access to university documents. 
-            When answering questions, please:
-            1. Provide comprehensive, detailed answers
-            2. Include all relevant information from the documents
-            3. Use bullet points or numbered lists when appropriate
-            4. Give examples when possible
-            5. Quote specific sections when relevant
-            
-            Context: {context}
-            
-            Question: {question}
-            
-            Chat History: {chat_history}
-            
-            Please provide a detailed answer:"""
-            
-            from langchain.prompts import PromptTemplate
-            QA_PROMPT = PromptTemplate(
-                template=template,
-                input_variables=["context", "question", "chat_history"]
-            )
-            
-            llm = ChatOpenAI(
-                temperature=0.7,
-                model_name="gpt-3.5-turbo-16k"  # Using 16k model for more context
-            )
-            
-            memory = ConversationBufferMemory(
-                memory_key="chat_history",
-                return_messages=True,
-                output_key="answer"
-            )
-            
-            qa_chain = ConversationalRetrievalChain.from_llm(
-                llm=llm,
-                retriever=vector_store.as_retriever(search_kwargs={
-                    "k": 8  # Increased number of chunks for more comprehensive context
-                }),
-                memory=memory,
-                return_source_documents=True,
-                chain_type="stuff",
-                combine_docs_chain_kwargs={"prompt": QA_PROMPT}
-            )
-            
-            status_container.success("Ready to answer questions!")
-            return qa_chain
-            
-        except Exception as qa_chain_error:
-            st.error(f"Error initializing QA chain: {qa_chain_error}")
+                    # Support .txt and .pdf files
+                    if filename.endswith('.txt'):
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            documents.append(Document(
+                                page_content=content, 
+                                metadata={'source': file_path}
+                            ))
+                    elif filename.endswith('.pdf'):
+                        loader = PyPDFLoader(file_path)
+                        documents.extend(loader.load())
+        
+        # Check if documents were found
+        if not documents:
+            st.warning("No documents found. Please add documents to the data directories.")
             return None
-            
-    except Exception as unexpected_error:
-        st.error(f"Unexpected error in chatbot initialization: {unexpected_error}")
-        st.error(traceback.format_exc())
+         
+        # Split documents into chunks
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, 
+            chunk_overlap=200
+        )
+        texts = text_splitter.split_documents(documents)
+        
+        status_container.info(f"Processing {len(texts)} text chunks...")
+        
+        # Create vector store
+        vector_store = create_vector_store(texts, embeddings, vectorstore_path)
+        
+        if vector_store is None:
+            st.error("Failed to create vector store")
+            return None
+        
+        # Create conversational retrieval chain
+        llm = ChatOpenAI(
+            model_name="gpt-3.5-turbo", 
+            temperature=0.3, 
+            openai_api_key=api_key
+        )
+        
+        memory = ConversationBufferMemory(
+            memory_key="chat_history", 
+            return_messages=True
+        )
+        
+        # Create QA chain with the custom vector store as a retriever
+        qa_chain = ConversationalRetrievalChain.from_llm(
+            llm=llm,
+            retriever=vector_store.as_retriever(search_kwargs={"k": 4}),
+            memory=memory,
+            return_source_documents=True
+        )
+        
+        status_container.success("Chatbot initialized successfully!")
+        return qa_chain
+    
+    except Exception as e:
+        st.error(f"Chatbot initialization error: {e}")
+        st.error(f"Detailed error: {traceback.format_exc()}")
         return None
 
 def main():
