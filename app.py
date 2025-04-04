@@ -819,11 +819,16 @@ def main():
             try:
                 with st.chat_message("assistant"):
                     with st.spinner("Thinking..."):
-                        response = st.session_state.qa_chain({"question": prompt})
-                        answer = response["answer"]
-                        sources = response.get("source_documents", [])
+                        # Get full response
+                        raw_response = st.session_state.qa_chain({"question": prompt})
+                        
+                        # Strip source_documents before passing to memory
+                        response = {"answer": raw_response["answer"]}
                         
                         # Display the main answer
+                        answer = raw_response["answer"]
+                        sources = raw_response.get("source_documents", [])
+                        
                         st.write(answer)
                         
                         # Display sources if available
