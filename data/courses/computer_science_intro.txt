@@ -1,0 +1,30 @@
+Introduction to Computer Science
+
+Course Overview:
+This introductory course provides students with a comprehensive foundation in computer science principles and programming.
+
+Key Topics:
+1. Programming Fundamentals
+   - Basic programming concepts
+   - Introduction to Python
+   - Control structures and data types
+
+2. Algorithm Design
+   - Problem-solving techniques
+   - Basic algorithm analysis
+   - Sorting and searching algorithms
+
+3. Computer Systems
+   - Hardware basics
+   - Operating system concepts
+   - Network fundamentals
+
+Learning Outcomes:
+- Understand basic programming principles
+- Write simple Python programs
+- Develop logical problem-solving skills
+- Gain insight into computer system architecture
+
+Prerequisites:
+- Basic mathematics
+- No prior programming experience required 
