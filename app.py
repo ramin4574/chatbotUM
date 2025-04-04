@@ -91,42 +91,50 @@ os.chmod("data/vectorstore", 0o755)
 
 def get_api_key():
     """
-    Retrieve the OpenAI API key from environment or user input.
-    Ensures a visible and clear method to input the API key.
+    Retrieve OpenAI API key from multiple sources.
+    
+    Priority:
+    1. Streamlit secrets
+    2. Environment variable
+    3. User input
+    
+    Returns:
+        str: OpenAI API key
     """
-    # First, try to load from .env file
-    load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
+    # Check Streamlit secrets first
+    try:
+        if st.secrets and "OPENAI_API_KEY" in st.secrets:
+            api_key = st.secrets["OPENAI_API_KEY"]
+            if api_key and api_key != "your_openai_api_key_here":
+                st.success("API key loaded from Streamlit secrets")
+                return api_key
+    except Exception as secrets_err:
+        st.warning(f"Error reading secrets: {secrets_err}")
     
-    # If no API key is found, create a prominent input method
-    if not api_key:
-        # Create an input field for the API key
-        api_key = st.text_input(
-            "Enter your OpenAI API Key", 
-            type="password", 
-            key="openai_api_key_input",
-            help="Your API key is used to authenticate with OpenAI's services"
-        )
-        
-        # Add a button to save the API key
-        if st.button("Save API Key", key="save_api_key_button"):
-            if api_key and api_key.strip():
-                # Save to .env file
-                with open('.env', 'w') as f:
-                    f.write(f"OPENAI_API_KEY={api_key.strip()}")
-                st.success("API Key saved successfully!")
-                # Explicitly set the environment variable
-                os.environ["OPENAI_API_KEY"] = api_key.strip()
-                # Rerun the app to use the new key
-                st.rerun()
-            else:
-                st.error("Please enter a valid API key")
-        
-        # If no key is entered, return None
-        if not api_key or not api_key.strip():
+    # Check environment variable
+    env_api_key = os.getenv("OPENAI_API_KEY")
+    if env_api_key:
+        st.success("API key loaded from environment variable")
+        return env_api_key
+    
+    # Fallback to user input
+    api_key = st.text_input(
+        "Enter your OpenAI API Key", 
+        type="password", 
+        help="You can get your API key from https://platform.openai.com/account/api-keys"
+    )
+    
+    if api_key:
+        # Optional: Validate API key format
+        if not api_key.startswith("sk-"):
+            st.warning("API key should start with 'sk-'. Please check your key.")
             return None
+        
+        # Optional: Store in environment for current session
+        os.environ["OPENAI_API_KEY"] = api_key
+        return api_key
     
-    return api_key
+    return None
 
 def get_file_size(size_in_bytes):
     """Get human readable file size from bytes."""
@@ -161,20 +169,23 @@ def get_chroma_client():
         # Try multiple import strategies
         try:
             import chromadb
-            from chromadb import PersistentClient
         except ImportError:
             # Fallback import
             import importlib
             chromadb = importlib.import_module('chromadb')
-            from chromadb import PersistentClient
         
         # More robust client creation
         try:
-            # Try PersistentClient first
-            client = PersistentClient(path=vectorstore_path)
+            # Try creating client with explicit settings
+            client = chromadb.Client(
+                chromadb.config.Settings(
+                    chroma_db_impl="duckdb+parquet",
+                    persist_directory=vectorstore_path
+                )
+            )
             return client
-        except Exception as persistent_err:
-            st.warning(f"PersistentClient failed: {persistent_err}")
+        except Exception as client_err:
+            st.warning(f"DuckDB client creation failed: {client_err}")
             
             # Fallback to in-memory client
             try:
@@ -206,8 +217,13 @@ def create_vector_store_alternative(texts, embeddings, vectorstore_path):
         import chromadb
         from chromadb.config import Settings
         
-        # Create an in-memory client
-        client = chromadb.Client()
+        # Create a client with DuckDB implementation
+        client = chromadb.Client(
+            Settings(
+                chroma_db_impl="duckdb+parquet",
+                persist_directory=vectorstore_path
+            )
+        )
         
         # Create a collection
         collection = client.create_collection(
