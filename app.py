@@ -148,9 +148,60 @@ def get_absolute_path(relative_path):
     """Get absolute path from relative path."""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), relative_path))
 
-# Robust ChromaDB client initialization
+# SQLite and ChromaDB compatibility check
+def check_sqlite_version():
+    """
+    Check SQLite version and provide guidance if incompatible.
+    
+    Returns:
+        bool: True if SQLite version is compatible, False otherwise
+    """
+    try:
+        import sqlite3
+        
+        # Get SQLite version
+        sqlite_version = sqlite3.sqlite_version
+        
+        # Split version into components
+        version_parts = [int(part) for part in sqlite_version.split('.')]
+        
+        # Check if version is at least 3.35.0
+        is_compatible = (
+            version_parts[0] > 3 or 
+            (version_parts[0] == 3 and version_parts[1] > 35) or 
+            (version_parts[0] == 3 and version_parts[1] == 35 and version_parts[2] >= 0)
+        )
+        
+        if not is_compatible:
+            st.error(f"""
+            ⚠️ Incompatible SQLite Version Detected
+            
+            Current Version: {sqlite_version}
+            Required Version: ≥ 3.35.0
+            
+            Possible Solutions:
+            1. Upgrade Python to a newer version
+            2. Manually upgrade SQLite
+            3. Use a different deployment environment
+            
+            Detailed Troubleshooting:
+            - Visit https://docs.trychroma.com/troubleshooting#sqlite
+            - Consider using a pre-built Python environment with updated SQLite
+            """)
+        
+        return is_compatible
+    except Exception as e:
+        st.error(f"Error checking SQLite version: {e}")
+        return False
+
+# Modify ChromaDB client initialization to handle SQLite version
 def get_chroma_client():
     try:
+        # First, check SQLite compatibility
+        if not check_sqlite_version():
+            st.error("Cannot initialize ChromaDB due to SQLite version incompatibility")
+            return None
+        
         # Use absolute path and explicit error handling
         vectorstore_path = os.path.abspath("data/vectorstore")
         
@@ -158,21 +209,31 @@ def get_chroma_client():
         os.makedirs(vectorstore_path, exist_ok=True)
         os.chmod(vectorstore_path, 0o755)
         
-        # Initialize client with comprehensive error handling
-        # Use direct import if needed
-        if not hasattr(chromadb, 'PersistentClient'):
+        # Import PersistentClient with additional error handling
+        try:
             from chromadb import PersistentClient
+        except ImportError as import_err:
+            st.error(f"Failed to import PersistentClient: {import_err}")
+            st.error("Possible causes:")
+            st.error("1. Incomplete ChromaDB installation")
+            st.error("2. Version incompatibility")
+            st.error("3. Environment configuration issue")
+            return None
+        
+        # Initialize client
+        try:
             client = PersistentClient(path=vectorstore_path)
-        else:
-            client = chromadb.PersistentClient(path=vectorstore_path)
-        
-        # Verify client initialization
-        if client is None:
-            raise ValueError("Failed to initialize ChromaDB client")
-        
-        return client
+            return client
+        except Exception as client_err:
+            st.error(f"Failed to create ChromaDB client: {client_err}")
+            st.error("Detailed troubleshooting:")
+            st.error("1. Check SQLite version")
+            st.error("2. Verify ChromaDB installation")
+            st.error("3. Ensure proper file permissions")
+            return None
+    
     except Exception as e:
-        st.error(f"ChromaDB Client Initialization Error: {e}")
+        st.error(f"Unexpected error in ChromaDB initialization: {e}")
         st.error(f"Error Details: {traceback.format_exc()}")
         return None
 
