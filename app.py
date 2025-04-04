@@ -562,14 +562,14 @@ class SimpleVectorStore(VectorStore):
             Retriever: A retriever object compatible with LangChain
         """
         from langchain.schema import BaseRetriever
+        from pydantic import Field, BaseModel
         
         if search_kwargs is None:
             search_kwargs = {"k": 4}
         
         class SimpleVectorStoreRetriever(BaseRetriever):
-            def __init__(self, vector_store, search_kwargs):
-                self.vector_store = vector_store
-                self.search_kwargs = search_kwargs
+            vector_store: 'SimpleVectorStore' = Field(...)
+            search_kwargs: dict = Field(default_factory=lambda: {"k": 4})
             
             def get_relevant_documents(self, query):
                 return self.vector_store.similarity_search(
@@ -580,7 +580,10 @@ class SimpleVectorStore(VectorStore):
             async def aget_relevant_documents(self, query):
                 return self.get_relevant_documents(query)
         
-        return SimpleVectorStoreRetriever(self, search_kwargs)
+        return SimpleVectorStoreRetriever(
+            vector_store=self, 
+            search_kwargs=search_kwargs
+        )
 
 # Modify vector store creation function
 def create_vector_store(texts, embeddings, vectorstore_path):
