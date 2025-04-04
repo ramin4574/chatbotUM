@@ -148,13 +148,70 @@ def get_absolute_path(relative_path):
     """Get absolute path from relative path."""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), relative_path))
 
-# SQLite and ChromaDB compatibility check
-def check_sqlite_version():
+# Alternative vector store initialization for environments with SQLite limitations
+def create_vector_store_alternative(texts, embeddings, vectorstore_path):
     """
-    Check SQLite version and provide guidance if incompatible.
+    Create a vector store using an alternative method that bypasses SQLite version check.
+    
+    Args:
+        texts (List[Document]): List of text documents
+        embeddings (OpenAIEmbeddings): Embedding function
+        vectorstore_path (str): Path to store the vector store
     
     Returns:
-        bool: True if SQLite version is compatible, False otherwise
+        Chroma: Initialized vector store or None
+    """
+    try:
+        # Import necessary modules
+        import chromadb
+        from chromadb.config import Settings
+        
+        # Create a client with minimal configuration
+        client = chromadb.Client(Settings(
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=vectorstore_path
+        ))
+        
+        # Create a collection
+        collection = client.create_collection(
+            name="university_docs", 
+            metadata={"hnsw:space": "cosine"}
+        )
+        
+        # Manually add embeddings
+        for i, doc in enumerate(texts):
+            # Generate embedding for the document
+            embedding = embeddings.embed_query(doc.page_content)
+            
+            # Add to collection
+            collection.add(
+                ids=[f"doc_{i}"],
+                embeddings=[embedding],
+                documents=[doc.page_content],
+                metadatas=[doc.metadata]
+            )
+        
+        # Create Chroma vector store from the collection
+        vector_store = Chroma(
+            client=client,
+            collection_name="university_docs",
+            embedding_function=embeddings
+        )
+        
+        return vector_store
+    
+    except Exception as e:
+        st.error(f"Alternative vector store creation failed: {e}")
+        st.error(f"Detailed error: {traceback.format_exc()}")
+        return None
+
+# Modify the SQLite version check to be more flexible
+def check_sqlite_version():
+    """
+    Check SQLite version with more flexible handling.
+    
+    Returns:
+        bool: Recommendation to proceed or not
     """
     try:
         import sqlite3
@@ -165,76 +222,74 @@ def check_sqlite_version():
         # Split version into components
         version_parts = [int(part) for part in sqlite_version.split('.')]
         
-        # Check if version is at least 3.35.0
-        is_compatible = (
-            version_parts[0] > 3 or 
-            (version_parts[0] == 3 and version_parts[1] > 35) or 
-            (version_parts[0] == 3 and version_parts[1] == 35 and version_parts[2] >= 0)
-        )
-        
-        if not is_compatible:
-            st.error(f"""
-            ⚠️ Incompatible SQLite Version Detected
+        # More lenient version check
+        if version_parts[0] < 3 or (version_parts[0] == 3 and version_parts[1] < 35):
+            st.warning(f"""
+            ⚠️ Potentially Incompatible SQLite Version Detected
             
             Current Version: {sqlite_version}
-            Required Version: ≥ 3.35.0
+            Recommended Version: ≥ 3.35.0
             
-            Possible Solutions:
-            1. Upgrade Python to a newer version
-            2. Manually upgrade SQLite
-            3. Use a different deployment environment
+            This may cause issues with ChromaDB initialization.
             
-            Detailed Troubleshooting:
-            - Visit https://docs.trychroma.com/troubleshooting#sqlite
-            - Consider using a pre-built Python environment with updated SQLite
+            Possible Workarounds:
+            1. Use alternative vector store method
+            2. Upgrade Python/SQLite
+            3. Consider different deployment environment
+            
+            Attempting to proceed with alternative initialization...
             """)
+            return False
         
-        return is_compatible
+        return True
+    
     except Exception as e:
         st.error(f"Error checking SQLite version: {e}")
         return False
 
-# Modify ChromaDB client initialization to handle SQLite version
+# Modify ChromaDB client initialization
 def get_chroma_client():
     try:
-        # First, check SQLite compatibility
-        if not check_sqlite_version():
-            st.error("Cannot initialize ChromaDB due to SQLite version incompatibility")
-            return None
-        
-        # Use absolute path and explicit error handling
+        # More flexible client initialization
         vectorstore_path = os.path.abspath("data/vectorstore")
         
         # Ensure directory exists and is writable
         os.makedirs(vectorstore_path, exist_ok=True)
         os.chmod(vectorstore_path, 0o755)
         
-        # Import PersistentClient with additional error handling
+        # Try multiple import strategies
         try:
+            import chromadb
             from chromadb import PersistentClient
-        except ImportError as import_err:
-            st.error(f"Failed to import PersistentClient: {import_err}")
-            st.error("Possible causes:")
-            st.error("1. Incomplete ChromaDB installation")
-            st.error("2. Version incompatibility")
-            st.error("3. Environment configuration issue")
-            return None
+        except ImportError:
+            # Fallback import
+            import importlib
+            chromadb = importlib.import_module('chromadb')
+            from chromadb import PersistentClient
         
-        # Initialize client
+        # More robust client creation
         try:
+            # Try PersistentClient first
             client = PersistentClient(path=vectorstore_path)
             return client
-        except Exception as client_err:
-            st.error(f"Failed to create ChromaDB client: {client_err}")
-            st.error("Detailed troubleshooting:")
-            st.error("1. Check SQLite version")
-            st.error("2. Verify ChromaDB installation")
-            st.error("3. Ensure proper file permissions")
-            return None
+        except Exception as persistent_err:
+            st.warning(f"PersistentClient failed: {persistent_err}")
+            
+            # Fallback to alternative client
+            try:
+                client = chromadb.Client(
+                    chromadb.config.Settings(
+                        chroma_db_impl="duckdb+parquet",
+                        persist_directory=vectorstore_path
+                    )
+                )
+                return client
+            except Exception as alt_err:
+                st.error(f"Alternative client creation failed: {alt_err}")
+                return None
     
     except Exception as e:
-        st.error(f"Unexpected error in ChromaDB initialization: {e}")
-        st.error(f"Error Details: {traceback.format_exc()}")
+        st.error(f"Unexpected error in ChromaDB client initialization: {e}")
         return None
 
 def check_existing_vectorstore():
@@ -455,9 +510,23 @@ def initialize_chatbot(api_key):
                 status_container.success("Vector store created and persisted successfully!")
                 
             except Exception as vector_store_error:
-                error_msg = str(vector_store_error)
-                st.error(f"Error creating vector store: {vector_store_error}")
-                return None
+                # Fallback to alternative vector store creation
+                st.warning(f"Standard vector store creation failed: {vector_store_error}")
+                st.info("Attempting alternative vector store initialization...")
+                
+                try:
+                    # Use alternative vector store creation method
+                    vector_store = create_vector_store_alternative(texts, embeddings, vectorstore_path)
+                    
+                    if vector_store is None:
+                        st.error("Failed to create vector store using both methods.")
+                        return None
+                    
+                    status_container.success("Vector store created using alternative method!")
+                
+                except Exception as alt_error:
+                    st.error(f"Alternative vector store creation failed: {alt_error}")
+                    return None
             
             # Clean up progress indicators
             progress_container.empty()
