@@ -561,10 +561,12 @@ class SimpleVectorStore(VectorStore):
         Returns:
             Retriever: A retriever object compatible with LangChain
         """
+        from langchain.schema import BaseRetriever
+        
         if search_kwargs is None:
             search_kwargs = {"k": 4}
         
-        class SimpleVectorStoreRetriever:
+        class SimpleVectorStoreRetriever(BaseRetriever):
             def __init__(self, vector_store, search_kwargs):
                 self.vector_store = vector_store
                 self.search_kwargs = search_kwargs
@@ -687,13 +689,13 @@ def initialize_chatbot(api_key):
         # Get the retriever from the vector store
         retriever = vector_store.as_retriever(search_kwargs={"k": 4})
         
-        # Use from_config instead of from_llm
-        qa_chain = ConversationalRetrievalChain.from_config({
-            "llm": llm,
-            "retriever": retriever,
-            "memory": memory,
-            "return_source_documents": True
-        })
+        # Use from_llm instead of from_config
+        qa_chain = ConversationalRetrievalChain.from_llm(
+            llm=llm,
+            retriever=retriever,
+            memory=memory,
+            return_source_documents=True
+        )
         
         status_container.success("Chatbot initialized successfully!")
         return qa_chain
