@@ -561,7 +561,7 @@ class SimpleVectorStore(VectorStore):
         Returns:
             Retriever: A retriever object compatible with LangChain
         """
-        from langchain.retrievers import BaseRetriever
+        from langchain_community.retrievers import BaseRetriever
         from typing import List, Any
 
         if search_kwargs is None:
