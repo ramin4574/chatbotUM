@@ -365,7 +365,7 @@ class SimpleVectorStore(VectorStore):
             documents (List[Document]): List of documents to index
             embeddings (Embeddings): Embedding function
         """
-        self.embeddings = embeddings
+        self._embeddings = embeddings
         # Extract text content from documents
         self.documents = documents
         self.texts = [doc.page_content for doc in documents]
