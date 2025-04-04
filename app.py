@@ -12,14 +12,25 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain.docstore.document import Document
 
-# Modify ChromaDB import to handle potential initialization issues
+# Explicitly handle ChromaDB import with comprehensive error handling
 try:
-    import chromadb
+    # Attempt to modify system path if needed
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Try importing with different strategies
+    try:
+        import chromadb
+    except ImportError:
+        # If standard import fails, try alternative import
+        import importlib
+        chromadb = importlib.import_module('chromadb')
+    
+    # Explicitly import Settings if needed
     from chromadb.config import Settings
-except ImportError as e:
-    st.error(f"ChromaDB import error: {e}")
-    st.error("Please ensure ChromaDB is correctly installed.")
-    raise
+except Exception as e:
+    st.error(f"Critical ChromaDB Import Error: {e}")
+    st.error(f"Import Traceback: {traceback.format_exc()}")
+    raise RuntimeError(f"Cannot import ChromaDB: {e}")
 
 def get_api_key():
     """
@@ -80,17 +91,31 @@ def get_absolute_path(relative_path):
     """Get absolute path from relative path."""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), relative_path))
 
-# Ensure the data directory exists with proper permissions
+# Ensure data directory exists with explicit permissions
 os.makedirs("data/vectorstore", exist_ok=True)
+os.chmod("data/vectorstore", 0o755)
 
-# Configure ChromaDB client with robust error handling
+# Robust ChromaDB client initialization
 def get_chroma_client():
     try:
-        # Use PersistentClient with explicit path
-        client = chromadb.PersistentClient(path=os.path.abspath("data/vectorstore"))
+        # Use absolute path and explicit error handling
+        vectorstore_path = os.path.abspath("data/vectorstore")
+        
+        # Ensure directory exists and is writable
+        os.makedirs(vectorstore_path, exist_ok=True)
+        os.chmod(vectorstore_path, 0o755)
+        
+        # Initialize client with comprehensive error handling
+        client = chromadb.PersistentClient(path=vectorstore_path)
+        
+        # Verify client initialization
+        if client is None:
+            raise ValueError("Failed to initialize ChromaDB client")
+        
         return client
     except Exception as e:
-        st.error(f"Error initializing ChromaDB client: {e}")
+        st.error(f"ChromaDB Client Initialization Error: {e}")
+        st.error(f"Error Details: {traceback.format_exc()}")
         return None
 
 def check_existing_vectorstore():
