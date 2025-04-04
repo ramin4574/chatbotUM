@@ -697,7 +697,8 @@ def initialize_chatbot(api_key):
             llm=llm,
             retriever=retriever,
             memory=memory,
-            return_source_documents=True
+            return_source_documents=True,
+            output_key="answer"  # Specify the output key for memory tracking
         )
         
         status_container.success("Chatbot initialized successfully!")
