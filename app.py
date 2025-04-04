@@ -73,14 +73,28 @@ def get_absolute_path(relative_path):
     """Get absolute path from relative path."""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), relative_path))
 
+# Ensure the data directory exists
+os.makedirs("data/vectorstore", exist_ok=True)
+
+# Configure ChromaDB client with a simple persistent storage
+try:
+    chroma_client = chromadb.PersistentClient(path="data/vectorstore")
+except Exception as e:
+    st.error(f"Error initializing ChromaDB: {e}")
+    chroma_client = None
+
 def check_existing_vectorstore():
     """Check if a persisted vector store exists."""
     try:
+        if chroma_client is None:
+            return None
+        
         vectorstore_path = get_absolute_path("data/vectorstore")
         if os.path.exists(vectorstore_path):
             # Try to load the existing vector store
             embeddings = get_embeddings()
             vector_store = Chroma(
+                client=chroma_client,
                 persist_directory=vectorstore_path,
                 embedding_function=embeddings,
                 collection_name="university_docs"
@@ -90,12 +104,7 @@ def check_existing_vectorstore():
                 return vector_store
     except Exception as e:
         st.error(f"Error loading existing vector store: {e}")
-        # If there's an error, try to clean up the potentially corrupted database
-        vectorstore_path = get_absolute_path("data/vectorstore")
-        if os.path.exists(vectorstore_path):
-            import shutil
-            shutil.rmtree(vectorstore_path)
-            st.info("Cleaned up existing vector store due to corruption.")
+    
     return None
 
 def ensure_directory_permissions(directory):
@@ -274,33 +283,17 @@ def initialize_chatbot(api_key):
                 status_container.info("Creating vector store (this may take a few minutes)...")
                 my_bar.progress(1.0)
                 
-                # Clean up any existing database and ensure proper permissions
+                # Ensure directory exists and is writable
                 vectorstore_path = get_absolute_path("data/vectorstore")
-                if os.path.exists(vectorstore_path):
-                    import shutil
-                    shutil.rmtree(vectorstore_path)
-                
-                # Create directory with proper permissions
                 os.makedirs(vectorstore_path, mode=0o755, exist_ok=True)
                 
-                # Ensure the directory and its parent are writable
-                os.chmod(vectorstore_path, 0o755)
-                os.chmod(os.path.dirname(vectorstore_path), 0o755)
-                
-                # Create a test file to verify write permissions
-                test_file = os.path.join(vectorstore_path, '.write_test')
-                try:
-                    with open(test_file, 'w') as f:
-                        f.write('test')
-                    os.remove(test_file)
-                except Exception as e:
-                    st.error(f"Directory {vectorstore_path} is not writable: {e}")
-                    return None
-                
                 embeddings = get_embeddings()
+                
+                # Create vector store with explicit client
                 vector_store = Chroma.from_documents(
                     documents=texts,
                     embedding=embeddings,
+                    client=chroma_client,
                     persist_directory=vectorstore_path,
                     collection_name="university_docs"
                 )
@@ -309,19 +302,7 @@ def initialize_chatbot(api_key):
                 
             except Exception as vector_store_error:
                 error_msg = str(vector_store_error)
-                if "insufficient_quota" in error_msg:
-                    st.error("⚠️ OpenAI API Quota Exceeded")
-                    st.error("Your OpenAI API key has run out of credits or has billing issues. Please:")
-                    st.markdown("""
-                    1. Visit [OpenAI's billing page](https://platform.openai.com/account/billing)
-                    2. Check your usage and billing status
-                    3. Either:
-                       - Add billing information if you haven't already
-                       - Add credits to your account
-                       - Or create a new API key with available credits
-                    """)
-                else:
-                    st.error(f"Error creating vector store: {vector_store_error}")
+                st.error(f"Error creating vector store: {vector_store_error}")
                 return None
             
             # Clean up progress indicators
