@@ -1,0 +1,29 @@
+Computer Science 101
+Course Overview:
+This is an introductory course to computer science fundamentals.
+
+Course Schedule:
+- Week 1: Introduction to Programming
+- Week 2: Basic Data Structures
+- Week 3: Algorithms and Problem Solving
+- Week 4: Object-Oriented Programming
+
+Requirements:
+- No prior programming experience required
+- Basic computer literacy
+- Access to a computer for programming assignments
+
+Grading:
+- Midterm Exam: 30%
+- Final Exam: 40%
+- Programming Assignments: 30%
+
+Office Hours:
+- Monday: 2-4 PM
+- Wednesday: 3-5 PM
+- Friday: 1-3 PM
+
+Contact Information:
+- Professor: Dr. Smith
+- Email: dr.smith@university.edu
+- Office: Room 101, Computer Science Building 
