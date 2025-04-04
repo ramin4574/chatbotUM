@@ -13,24 +13,41 @@ from langchain.memory import ConversationBufferMemory
 from langchain.docstore.document import Document
 
 # Explicitly handle ChromaDB import with comprehensive error handling
-try:
-    # Attempt to modify system path if needed
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    
-    # Try importing with different strategies
+import os
+import sys
+import importlib
+import traceback
+
+# Attempt to import ChromaDB with multiple fallback strategies
+def import_chromadb():
     try:
+        # Strategy 1: Direct import
         import chromadb
+        return chromadb
     except ImportError:
-        # If standard import fails, try alternative import
-        import importlib
-        chromadb = importlib.import_module('chromadb')
-    
-    # Explicitly import Settings if needed
-    from chromadb.config import Settings
-except Exception as e:
-    st.error(f"Critical ChromaDB Import Error: {e}")
-    st.error(f"Import Traceback: {traceback.format_exc()}")
-    raise RuntimeError(f"Cannot import ChromaDB: {e}")
+        try:
+            # Strategy 2: Use importlib
+            chromadb = importlib.import_module('chromadb')
+            return chromadb
+        except ImportError:
+            try:
+                # Strategy 3: Modify system path
+                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+                sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'venv', 'lib', 'python3.12', 'site-packages'))
+                import chromadb
+                return chromadb
+            except ImportError as e:
+                # Detailed error logging
+                st.error(f"Critical ChromaDB Import Error: {e}")
+                st.error(f"Import Traceback: {traceback.format_exc()}")
+                st.error("Possible solutions:")
+                st.error("1. Ensure ChromaDB is installed in your environment")
+                st.error("2. Check Python version compatibility")
+                st.error("3. Verify package installation")
+                raise RuntimeError(f"Cannot import ChromaDB: {e}")
+
+# Perform the import
+chromadb = import_chromadb()
 
 def get_api_key():
     """
