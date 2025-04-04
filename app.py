@@ -148,6 +148,46 @@ def get_absolute_path(relative_path):
     """Get absolute path from relative path."""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), relative_path))
 
+# Modify ChromaDB client initialization
+def get_chroma_client():
+    try:
+        # More flexible client initialization
+        vectorstore_path = os.path.abspath("data/vectorstore")
+        
+        # Ensure directory exists and is writable
+        os.makedirs(vectorstore_path, exist_ok=True)
+        os.chmod(vectorstore_path, 0o755)
+        
+        # Try multiple import strategies
+        try:
+            import chromadb
+            from chromadb import PersistentClient
+        except ImportError:
+            # Fallback import
+            import importlib
+            chromadb = importlib.import_module('chromadb')
+            from chromadb import PersistentClient
+        
+        # More robust client creation
+        try:
+            # Try PersistentClient first
+            client = PersistentClient(path=vectorstore_path)
+            return client
+        except Exception as persistent_err:
+            st.warning(f"PersistentClient failed: {persistent_err}")
+            
+            # Fallback to in-memory client
+            try:
+                client = chromadb.Client()
+                return client
+            except Exception as in_memory_err:
+                st.error(f"In-memory client creation failed: {in_memory_err}")
+                return None
+    
+    except Exception as e:
+        st.error(f"Unexpected error in ChromaDB client initialization: {e}")
+        return None
+
 # Alternative vector store initialization for environments with SQLite limitations
 def create_vector_store_alternative(texts, embeddings, vectorstore_path):
     """
@@ -166,11 +206,8 @@ def create_vector_store_alternative(texts, embeddings, vectorstore_path):
         import chromadb
         from chromadb.config import Settings
         
-        # Create a client with minimal configuration
-        client = chromadb.Client(Settings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=vectorstore_path
-        ))
+        # Create an in-memory client
+        client = chromadb.Client()
         
         # Create a collection
         collection = client.create_collection(
@@ -233,7 +270,7 @@ def check_sqlite_version():
             This may cause issues with ChromaDB initialization.
             
             Possible Workarounds:
-            1. Use alternative vector store method
+            1. Use in-memory vector store
             2. Upgrade Python/SQLite
             3. Consider different deployment environment
             
@@ -246,51 +283,6 @@ def check_sqlite_version():
     except Exception as e:
         st.error(f"Error checking SQLite version: {e}")
         return False
-
-# Modify ChromaDB client initialization
-def get_chroma_client():
-    try:
-        # More flexible client initialization
-        vectorstore_path = os.path.abspath("data/vectorstore")
-        
-        # Ensure directory exists and is writable
-        os.makedirs(vectorstore_path, exist_ok=True)
-        os.chmod(vectorstore_path, 0o755)
-        
-        # Try multiple import strategies
-        try:
-            import chromadb
-            from chromadb import PersistentClient
-        except ImportError:
-            # Fallback import
-            import importlib
-            chromadb = importlib.import_module('chromadb')
-            from chromadb import PersistentClient
-        
-        # More robust client creation
-        try:
-            # Try PersistentClient first
-            client = PersistentClient(path=vectorstore_path)
-            return client
-        except Exception as persistent_err:
-            st.warning(f"PersistentClient failed: {persistent_err}")
-            
-            # Fallback to alternative client
-            try:
-                client = chromadb.Client(
-                    chromadb.config.Settings(
-                        chroma_db_impl="duckdb+parquet",
-                        persist_directory=vectorstore_path
-                    )
-                )
-                return client
-            except Exception as alt_err:
-                st.error(f"Alternative client creation failed: {alt_err}")
-                return None
-    
-    except Exception as e:
-        st.error(f"Unexpected error in ChromaDB client initialization: {e}")
-        return None
 
 def check_existing_vectorstore():
     """Check if a persisted vector store exists."""
@@ -522,7 +514,7 @@ def initialize_chatbot(api_key):
                         st.error("Failed to create vector store using both methods.")
                         return None
                     
-                    status_container.success("Vector store created using alternative method!")
+                    status_container.success("Vector store created using in-memory method!")
                 
                 except Exception as alt_error:
                     st.error(f"Alternative vector store creation failed: {alt_error}")
