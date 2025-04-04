@@ -11,8 +11,15 @@ from langchain_openai import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain.docstore.document import Document
-from chromadb.config import Settings
-import chromadb
+
+# Modify ChromaDB import to handle potential initialization issues
+try:
+    import chromadb
+    from chromadb.config import Settings
+except ImportError as e:
+    st.error(f"ChromaDB import error: {e}")
+    st.error("Please ensure ChromaDB is correctly installed.")
+    raise
 
 def get_api_key():
     """
@@ -73,20 +80,23 @@ def get_absolute_path(relative_path):
     """Get absolute path from relative path."""
     return os.path.abspath(os.path.join(os.path.dirname(__file__), relative_path))
 
-# Ensure the data directory exists
+# Ensure the data directory exists with proper permissions
 os.makedirs("data/vectorstore", exist_ok=True)
 
-# Configure ChromaDB client with a simple persistent storage
-try:
-    chroma_client = chromadb.PersistentClient(path="data/vectorstore")
-except Exception as e:
-    st.error(f"Error initializing ChromaDB: {e}")
-    chroma_client = None
+# Configure ChromaDB client with robust error handling
+def get_chroma_client():
+    try:
+        # Use PersistentClient with explicit path
+        client = chromadb.PersistentClient(path=os.path.abspath("data/vectorstore"))
+        return client
+    except Exception as e:
+        st.error(f"Error initializing ChromaDB client: {e}")
+        return None
 
 def check_existing_vectorstore():
     """Check if a persisted vector store exists."""
     try:
-        if chroma_client is None:
+        if get_chroma_client() is None:
             return None
         
         vectorstore_path = get_absolute_path("data/vectorstore")
@@ -94,7 +104,7 @@ def check_existing_vectorstore():
             # Try to load the existing vector store
             embeddings = get_embeddings()
             vector_store = Chroma(
-                client=chroma_client,
+                client=get_chroma_client(),
                 persist_directory=vectorstore_path,
                 embedding_function=embeddings,
                 collection_name="university_docs"
@@ -293,7 +303,7 @@ def initialize_chatbot(api_key):
                 vector_store = Chroma.from_documents(
                     documents=texts,
                     embedding=embeddings,
-                    client=chroma_client,
+                    client=get_chroma_client(),
                     persist_directory=vectorstore_path,
                     collection_name="university_docs"
                 )
