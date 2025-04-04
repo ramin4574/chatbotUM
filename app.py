@@ -561,25 +561,27 @@ class SimpleVectorStore(VectorStore):
         Returns:
             Retriever: A retriever object compatible with LangChain
         """
+        from langchain.retrievers import BaseRetriever
+        from typing import List, Any
+
         if search_kwargs is None:
             search_kwargs = {"k": 4}
         
-        # Create a custom retriever class
-        class SimpleRetriever:
+        class SimpleVectorStoreRetriever(BaseRetriever):
             def __init__(self, vector_store, search_kwargs):
                 self.vector_store = vector_store
                 self.search_kwargs = search_kwargs
             
-            def get_relevant_documents(self, query):
+            def get_relevant_documents(self, query: str) -> List[Document]:
                 return self.vector_store.similarity_search(
                     query, 
                     k=self.search_kwargs.get("k", 4)
                 )
             
-            async def aget_relevant_documents(self, query):
+            async def aget_relevant_documents(self, query: str) -> List[Document]:
                 return self.get_relevant_documents(query)
         
-        return SimpleRetriever(self, search_kwargs)
+        return SimpleVectorStoreRetriever(self, search_kwargs)
 
 # Modify vector store creation function
 def create_vector_store(texts, embeddings, vectorstore_path):
