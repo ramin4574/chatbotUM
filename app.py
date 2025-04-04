@@ -612,6 +612,23 @@ def create_vector_store(texts, embeddings, vectorstore_path):
         st.error(f"Detailed error: {traceback.format_exc()}")
         return None
 
+# Custom memory class to handle multi-key outputs
+class PatchedMemory(ConversationBufferMemory):
+    def _get_input_output(self, inputs, outputs):
+        """
+        Patch default memory saving to only store the 'answer' field
+        
+        Args:
+            inputs (dict): Input dictionary
+            outputs (dict): Output dictionary from the chain
+        
+        Returns:
+            Tuple of input and filtered output
+        """
+        if "answer" in outputs:
+            return super()._get_input_output(inputs, {"answer": outputs["answer"]})
+        return super()._get_input_output(inputs, outputs)
+
 # Modify the initialization function to use the new vector store
 def initialize_chatbot(api_key):
     """
@@ -684,7 +701,7 @@ def initialize_chatbot(api_key):
             openai_api_key=api_key
         )
         
-        memory = ConversationBufferMemory(
+        memory = PatchedMemory(
             memory_key="chat_history", 
             return_messages=True
         )
