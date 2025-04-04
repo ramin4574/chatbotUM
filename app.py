@@ -684,13 +684,16 @@ def initialize_chatbot(api_key):
             return_messages=True
         )
         
-        # Create QA chain with the custom vector store as a retriever
-        qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=llm,
-            retriever=vector_store.as_retriever(search_kwargs={"k": 4}),
-            memory=memory,
-            return_source_documents=True
-        )
+        # Get the retriever from the vector store
+        retriever = vector_store.as_retriever(search_kwargs={"k": 4})
+        
+        # Use from_config instead of from_llm
+        qa_chain = ConversationalRetrievalChain.from_config({
+            "llm": llm,
+            "retriever": retriever,
+            "memory": memory,
+            "return_source_documents": True
+        })
         
         status_container.success("Chatbot initialized successfully!")
         return qa_chain
