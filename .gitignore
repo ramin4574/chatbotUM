@@ -49,4 +49,19 @@ data/vectorstore/
 data/policies/
 data/courses/
 data/handbooks/
-data/faqs/ 
+data/faqs/
+
+# Streamlit Secrets
+.streamlit/secrets.toml
+
+# ChromaDB
+data/vectorstore/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+.env
+.venv 
